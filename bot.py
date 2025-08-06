@@ -35,7 +35,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for offer in data["data"]:
             price = offer["price"]["total"]
             airline = offer["validatingAirlineCodes"][0]
-            msg += f"✈️ {airline}: ${price}\n"
+            msg += f"✈️ {airline}: ₽{price}\n"
 
         await update.message.reply_text(msg)
     except Exception as e:
