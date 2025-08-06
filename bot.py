@@ -46,9 +46,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def get_airport_code(city):
     city_map = {
         "Tashkent": "TAS",
+        "Samarkand": "SKD",
+        "Fergana": "FEG",
+        "Urgench": "UGC",
+        "Bukhara": "BHK",
+        "Namangan": "NMA",
+        "Andijan": "AZN",
+        "Nukus": "NCU",
         "Moscow": "MOW",
         "Istanbul": "IST",
-        "Dubai": "DXB"
+        "Dubai": "DXB",
+        "Antalya": "AYT",
+        "Jeddah": "JED",
+        "Seoul": "ICN"
         # Add more cities here...
     }
     return city_map.get(city, city.upper())
