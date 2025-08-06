@@ -22,7 +22,7 @@ def search_flights(origin, destination, date):
         'destinationLocationCode': destination,
         'departureDate': date,
         'adults': 1,
-        'currencyCode': 'USD',
+        'currencyCode': 'RUB',
         'max': 3
     }
     headers = {
