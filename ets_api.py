@@ -15,7 +15,7 @@ NEXT_TOKEN_PAYLOAD = {
 }
 
 
-def get_ets_prices():
+def get_ets_prices(origin_code, destination_code, date):
     try:
         url = "https://b2b.easybooking.uz/api/air/offers"
         response = requests.post(url, headers=HEADERS, json=NEXT_TOKEN_PAYLOAD)
