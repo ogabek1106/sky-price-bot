@@ -27,23 +27,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        data = get_ets_prices()
+    origin_code = get_airport_code(origin)
+    destination_code = get_airport_code(destination)
+    data = search_flights(origin_code, destination_code, date)
 
-        if not data or "offers" not in data:
-            await update.message.reply_text("⚠️ Could not fetch prices right now.")
-            return
+    if not data or "data" not in data or not data["data"]:
+        await update.message.reply_text("⚠️ No flights found. This might be because your cookies or `next_token` are expired. Please update them.")
+        return
 
-        msg = f"🛫 {origin} → {destination} on {date}\n\n"
-        for offer in data["offers"][:10]:  # Limit to 10 results
-            price = offer.get("price", {}).get("amount", "???")
-            airline = offer.get("validating_carrier", "Unknown")
-            flight = offer.get("segments", [{}])[0].get("flight_number", "???")
-            msg += f"✈️ {flight} ({airline}): ₽{price}\n"
+    msg = f"🛫 {origin} → {destination} on {date}\n\n"
+    for offer in data["data"]:
+        price = offer["price"]["total"]
+        airline = offer["validatingAirlineCodes"][0]
+        flight = offer["itineraries"][0]["segments"][0]["carrierCode"] + offer["itineraries"][0]["segments"][0]["number"]
+        msg += f"✈️ {flight}: ₽{price}\n"
 
-        await update.message.reply_text(msg)
-    except Exception as e:
-        print(e)
-        await update.message.reply_text("⚠️ Could not find flights. Check format or try later.")
+    await update.message.reply_text(msg)
+
+except KeyError as e:
+    print("KeyError:", str(e))
+    await update.message.reply_text(f"❌ Missing expected data in response: {str(e)}")
+
+except Exception as e:
+    print("Error:", str(e))
+    await update.message.reply_text(f"❌ Error occurred: {str(e)}")
 
 
 def main():
