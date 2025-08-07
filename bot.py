@@ -1,6 +1,6 @@
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
-from amadeus_api import search_flights
+from ets_api import get_ets_prices
 from config import BOT_TOKEN
 import logging
 
@@ -27,42 +27,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     try:
-        origin_code = get_airport_code(origin)
-        destination_code = get_airport_code(destination)
-        data = search_flights(origin_code, destination_code, date)
+        data = get_ets_prices()
+
+        if not data or "offers" not in data:
+            await update.message.reply_text("⚠️ Could not fetch prices right now.")
+            return
 
         msg = f"🛫 {origin} → {destination} on {date}\n\n"
-        for offer in data["data"]:
-            price = offer["price"]["total"]
-            airline = offer["validatingAirlineCodes"][0]
-            flight = offer["itineraries"][0]["segments"][0]["carrierCode"] + offer["itineraries"][0]["segments"][0]["number"]
-            msg += f"✈️ {flight}: ₽{price}\n"
+        for offer in data["offers"][:10]:  # Limit to 10 results
+            price = offer.get("price", {}).get("amount", "???")
+            airline = offer.get("validating_carrier", "Unknown")
+            flight = offer.get("segments", [{}])[0].get("flight_number", "???")
+            msg += f"✈️ {flight} ({airline}): ₽{price}\n"
 
         await update.message.reply_text(msg)
     except Exception as e:
         print(e)
         await update.message.reply_text("⚠️ Could not find flights. Check format or try later.")
-
-
-def get_airport_code(city):
-    city_map = {
-        "Tashkent": "TAS",
-        "Samarkand": "SKD",
-        "Fergana": "FEG",
-        "Urgench": "UGC",
-        "Bukhara": "BHK",
-        "Namangan": "NMA",
-        "Andijan": "AZN",
-        "Nukus": "NCU",
-        "Moscow": "MOW",
-        "Istanbul": "IST",
-        "Dubai": "DXB",
-        "Antalya": "AYT",
-        "Jeddah": "JED",
-        "Seoul": "ICN"
-        # Add more cities here...
-    }
-    return city_map.get(city, city.upper())
 
 
 def main():
