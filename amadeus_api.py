@@ -49,70 +49,19 @@ def _price_offer(offer: Dict[str, Any]) -> Dict[str, Any]:
     }
     r = requests.post(url, headers=_auth_headers(), json=payload, timeout=40)
     r.raise_for_status()
-    priced = r.json()["data"]["flightOffers"][0]
-    return priced
+    return r.json()["data"]["flightOffers"][0]
 
-def _normalize(priced_offer: dict) -> dict:
-    """
-    Extract display fields for the bot.
-    """
-    # first itinerary / first segment (outbound, first leg)
-    segs = priced_offer["itineraries"][0]["segments"]
-    first = segs[0]
-    dep_airport = first["departure"]["iataCode"]
-    arr_airport = segs[-1]["arrival"]["iataCode"]
-
-    # flight number like "HY 604"
-    marketing = first["carrierCode"]
-    number = first["number"]
-    flight_no = f"{marketing} {number}"
-
-    # time "HH:MM" from ISO (local time as returned by Amadeus)
-    dep_time_iso = first["departure"]["at"]  # e.g., "2025-08-25T11:45:00"
-    dep_hhmm = dep_time_iso.split("T")[1][:5] if "T" in dep_time_iso else dep_time_iso
-
-    # cabin + booking class (K, Y, etc.) — from travelerPricings[0]
-    cabin = "ECONOMY"
-    booking_class = ""
-    try:
-        first_seg_id = first["id"]
-        tp = priced_offer.get("travelerPricings", [])[0]
-        for f in tp.get("fareDetailsBySegment", []):
-            if str(f.get("segmentId")) == str(first_seg_id):
-                cabin = f.get("cabin", cabin)          # e.g., "ECONOMY"
-                booking_class = f.get("class", "")     # e.g., "K"
-                break
-    except Exception:
-        pass
-
-    # price
-    price_total = priced_offer["price"].get("grandTotal") or priced_offer["price"]["total"]
-    currency = priced_offer["price"].get("currency", "RUB")
-
-    return {
-        "dep_airport": dep_airport,
-        "arr_airport": arr_airport,
-        "flight_no": flight_no,
-        "dep_time": dep_hhmm,
-        "cabin": cabin.title(),         # "Economy"
-        "booking_class": booking_class, # "K"
-        "price_total": price_total,
-        "currency": currency,
-        "raw": priced_offer,
-    }
-
-def search_validated_offers(
+def search_hy_all_classes(
     origin: str,
     destination: str,
     date: str,
     adults: int = 1,
     currency: str = "RUB",
-    max_results: int = 5
+    max_results: int = 50
 ) -> List[Dict[str, Any]]:
     """
-    Search → immediately re-price → return only *validated* offers (normalized).
+    Search HY flights → immediately re-price → group by exact flight and show all available classes.
     """
-    # 1) Search (candidate fares; not final)
     search_url = f"{BASE_URL}/v2/shopping/flight-offers"
     params = {
         "originLocationCode": origin,
@@ -126,16 +75,56 @@ def search_validated_offers(
     r.raise_for_status()
     candidates = r.json().get("data", [])
 
-    # 2) Re-price top N and keep only successful ones
-    confirmed: List[Dict[str, Any]] = []
+    flights_map: Dict[tuple, Dict] = {}
+
     for c in candidates:
         try:
             priced = _price_offer(c)
-            confirmed.append(_normalize(priced))
+
+            # Filter to HY flights only
+            first_seg = priced["itineraries"][0]["segments"][0]
+            if first_seg["carrierCode"] != "HY":
+                continue
+
+            dep_airport = first_seg["departure"]["iataCode"]
+            arr_airport = priced["itineraries"][0]["segments"][-1]["arrival"]["iataCode"]
+            flight_no = f"{first_seg['carrierCode']} {first_seg['number']}"
+            dep_time_iso = first_seg["departure"]["at"]
+            dep_hhmm = dep_time_iso.split("T")[1][:5] if "T" in dep_time_iso else dep_time_iso
+
+            # Get cabin + booking class
+            tp = priced.get("travelerPricings", [])[0]
+            fare_info = tp.get("fareDetailsBySegment", [])[0]
+            cabin = fare_info.get("cabin", "").title()
+            booking_class = fare_info.get("class", "")
+
+            # Price
+            price_total = priced["price"].get("grandTotal") or priced["price"]["total"]
+            currency_code = priced["price"].get("currency", currency)
+
+            key = (flight_no, dep_hhmm)  # group by exact flight & departure time
+
+            if key not in flights_map:
+                flights_map[key] = {
+                    "dep_airport": dep_airport,
+                    "arr_airport": arr_airport,
+                    "flight_no": flight_no,
+                    "dep_time": dep_hhmm,
+                    "classes": []
+                }
+
+            flights_map[key]["classes"].append({
+                "cabin": cabin,
+                "booking_class": booking_class,
+                "price_total": price_total,
+                "currency": currency_code
+            })
+
         except Exception:
-            # offer vanished or price changed too much -> skip it
             continue
 
-    # 3) Sort by final price
-    confirmed.sort(key=lambda x: float(x["price_total"]))
-    return confirmed
+    # Sort classes inside each flight by price
+    for flight in flights_map.values():
+        flight["classes"].sort(key=lambda x: float(x["price_total"]))
+
+    return list(flights_map.values())
