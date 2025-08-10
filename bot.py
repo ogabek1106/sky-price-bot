@@ -1,9 +1,8 @@
 # bot.py
-
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
-from ets_api import get_ets_prices
 from config import BOT_TOKEN
+from amadeus_api import search_validated_offers
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -37,7 +36,6 @@ def get_airport_code(city):
         "Antalya": "AYT",
         "Jeddah": "JED",
         "Seoul": "ICN"
-        # Add more if needed...
     }
     return city_map.get(city, city.upper())
 
@@ -47,30 +45,31 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     origin, destination, date = parse_user_input(text)
 
     if not all([origin, destination, date]):
-        await update.message.reply_text("❌ Please use format: `Tashkent to Moscow on 2025-08-25`")
+        await update.message.reply_text("❌ Please use: `Tashkent to Moscow on 2025-08-25`", parse_mode="Markdown")
         return
 
     try:
         origin_code = get_airport_code(origin)
         destination_code = get_airport_code(destination)
-        data = get_ets_prices(origin_code, destination_code, date)
 
-        if not data or "data" not in data or not data["data"]:
-            await update.message.reply_text("⚠️ No flights found. Your cookies or `next_token` may be expired.")
+        await update.message.reply_text("🔎 Checking real, validated prices…")
+
+        # ✅ Show only priced (confirmed) offers
+        deals = search_validated_offers(origin_code, destination_code, date, adults=1, currency="RUB", max_results=5)
+
+        if not deals:
+            await update.message.reply_text("⚠️ No confirmed fares right now (offers changed while validating). Try another date or route.")
             return
 
-        msg = f"🛫 {origin} → {destination} on {date}\n\n"
-        for offer in data["data"]:
-            price = offer["price"]["total"]
-            airline = offer["validatingAirlineCodes"][0]
-            flight = offer["itineraries"][0]["segments"][0]["carrierCode"] + offer["itineraries"][0]["segments"][0]["number"]
-            msg += f"✈️ {flight} ({airline}): ₽{price}\n"
+        lines = [f"🛫 {origin} → {destination} on {date}\n(Validated just now ✅)\n"]
+        for d in deals[:5]:
+            lines.append(
+                f"✈️ {d['flight_no']} ({d.get('validating_airline','')})\n"
+                f"   {d['dep_time']} → {d['arr_time']}\n"
+                f"   💰 {d['price_total']} {d['currency']}"
+            )
 
-        await update.message.reply_text(msg)
-
-    except KeyError as e:
-        print("KeyError:", str(e))
-        await update.message.reply_text(f"❌ Missing expected data: {str(e)}")
+        await update.message.reply_text("\n\n".join(lines))
 
     except Exception as e:
         print("Error:", str(e))
