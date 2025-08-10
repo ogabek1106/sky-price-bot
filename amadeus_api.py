@@ -3,9 +3,9 @@ import os
 import time
 import requests
 from typing import List, Dict, Any
-from config import AMADEUS_CLIENT_ID, AMADEUS_CLIENT_SECRET
+from config import AMADEUS_CLIENT_ID, AMADEUS_CLIENT_SECRET, AMADEUS_HOST
 
-BASE_URL = os.getenv("AMADEUS_HOST", "https://test.api.amadeus.com")
+BASE_URL = os.getenv("AMADEUS_HOST", AMADEUS_HOST or "https://test.api.amadeus.com")
 
 # --- tiny token cache so we don't request a token every call ---
 _token = {"value": None, "exp": 0}
@@ -30,8 +30,10 @@ def _get_access_token() -> str:
     return _token["value"]
 
 def _auth_headers() -> Dict[str, str]:
-    return {"Authorization": f"Bearer {_get_access_token()}",
-            "Content-Type": "application/json"}
+    return {
+        "Authorization": f"Bearer {_get_access_token()}",
+        "Content-Type": "application/json"
+    }
 
 def _price_offer(offer: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -50,33 +52,63 @@ def _price_offer(offer: Dict[str, Any]) -> Dict[str, Any]:
     priced = r.json()["data"]["flightOffers"][0]
     return priced
 
-def _normalize(priced_offer: Dict[str, Any]) -> Dict[str, Any]:
+def _normalize(priced_offer: dict) -> dict:
     """
-    Extract what the bot needs to display, from a priced offer.
+    Extract display fields for the bot.
     """
-    price_total = priced_offer["price"]["grandTotal"] if "grandTotal" in priced_offer["price"] else priced_offer["price"]["total"]
-    validating = None
-    if priced_offer.get("validatingAirlineCodes"):
-        validating = priced_offer["validatingAirlineCodes"][0]
-
-    # Basic times/flight number from first & last segments
+    # first itinerary / first segment (outbound, first leg)
     segs = priced_offer["itineraries"][0]["segments"]
-    first, last = segs[0], segs[-1]
-    dep_time = first["departure"]["at"]
-    arr_time = last["arrival"]["at"]
-    flight_no = f'{first["carrierCode"]}{first["number"]}'
+    first = segs[0]
+    dep_airport = first["departure"]["iataCode"]
+    arr_airport = segs[-1]["arrival"]["iataCode"]
+
+    # flight number like "HY 604"
+    marketing = first["carrierCode"]
+    number = first["number"]
+    flight_no = f"{marketing} {number}"
+
+    # time "HH:MM" from ISO (local time as returned by Amadeus)
+    dep_time_iso = first["departure"]["at"]  # e.g., "2025-08-25T11:45:00"
+    dep_hhmm = dep_time_iso.split("T")[1][:5] if "T" in dep_time_iso else dep_time_iso
+
+    # cabin + booking class (K, Y, etc.) — from travelerPricings[0]
+    cabin = "ECONOMY"
+    booking_class = ""
+    try:
+        first_seg_id = first["id"]
+        tp = priced_offer.get("travelerPricings", [])[0]
+        for f in tp.get("fareDetailsBySegment", []):
+            if str(f.get("segmentId")) == str(first_seg_id):
+                cabin = f.get("cabin", cabin)          # e.g., "ECONOMY"
+                booking_class = f.get("class", "")     # e.g., "K"
+                break
+    except Exception:
+        pass
+
+    # price
+    price_total = priced_offer["price"].get("grandTotal") or priced_offer["price"]["total"]
+    currency = priced_offer["price"].get("currency", "RUB")
 
     return {
-        "price_total": price_total,
-        "currency": priced_offer["price"].get("currency", "RUB"),
-        "validating_airline": validating,
+        "dep_airport": dep_airport,
+        "arr_airport": arr_airport,
         "flight_no": flight_no,
-        "dep_time": dep_time,
-        "arr_time": arr_time,
-        "raw": priced_offer,  # keep full payload for later booking if needed
+        "dep_time": dep_hhmm,
+        "cabin": cabin.title(),         # "Economy"
+        "booking_class": booking_class, # "K"
+        "price_total": price_total,
+        "currency": currency,
+        "raw": priced_offer,
     }
 
-def search_validated_offers(origin: str, destination: str, date: str, adults: int = 1, currency: str = "RUB", max_results: int = 5) -> List[Dict[str, Any]]:
+def search_validated_offers(
+    origin: str,
+    destination: str,
+    date: str,
+    adults: int = 1,
+    currency: str = "RUB",
+    max_results: int = 5
+) -> List[Dict[str, Any]]:
     """
     Search → immediately re-price → return only *validated* offers (normalized).
     """
