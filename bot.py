@@ -8,7 +8,7 @@ import logging
 
 logging.basicConfig(level=logging.INFO)
 
-SERVICE_FEE_RUB = 10200  # fixed fee to add on top of validated price
+SERVICE_FEE_RUB = 10200  # fixed fee to add
 
 # 🧠 Parse user input
 def parse_user_input(text):
@@ -48,7 +48,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     origin, destination, date = parse_user_input(text)
 
     if not all([origin, destination, date]):
-        await update.message.reply_text("❌ Please use: `Tashkent to Moscow on 2025-08-25`", parse_mode="Markdown")
+        await update.message.reply_text(
+            "❌ Please use format: `Tashkent to Moscow on 2025-08-25`",
+            parse_mode="Markdown"
+        )
         return
 
     try:
@@ -57,26 +60,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update.message.reply_text("🔎 Checking real, validated prices…")
 
-        deals = search_validated_offers(origin_code, destination_code, date, adults=1, currency="RUB", max_results=5)
+        deals = search_validated_offers(
+            origin_code, destination_code, date,
+            adults=1, currency="RUB", max_results=5
+        )
 
         if not deals:
-            await update.message.reply_text("⚠️ No confirmed fares right now (offers changed while validating). Try another date or route.")
+            await update.message.reply_text(
+                "⚠️ No confirmed fares right now (offers changed while validating). Try another date or route."
+            )
             return
 
-        lines = [f"🛫 {origin} → {destination} on {date}\n(Validated just now ✅)\n"]
-        for d in deals[:5]:
-            base_price = Decimal(str(d['price_total']))
-            final_price = base_price + Decimal(SERVICE_FEE_RUB)
+        lines = []
+        for d in deals:
+            # Apply service fee
+            final_price = Decimal(str(d["price_total"])) + Decimal(SERVICE_FEE_RUB)
+
+            # Format exactly like your example
             lines.append(
-                f"✈️ {d['flight_no']} ({d.get('validating_airline','')})\n"
-                f"   {d['dep_time']} → {d['arr_time']}\n"
-                f"   💰 {final_price:.0f} {d['currency']}"
+                f"🗺 {origin} ({d['dep_airport']}) -> {destination} ({d['arr_airport']})\n"
+                f"✈️ {d['flight_no']}\n"
+                f"⏰ {d['dep_time']}\n"
+                f"📎 {d['cabin']} {d['booking_class']}\n"
+                f"💰 {final_price:.0f} {d['currency']}"
             )
 
         await update.message.reply_text("\n\n".join(lines))
 
     except Exception as e:
-        print("Error:", str(e))
+        logging.exception("Error in handle_message")
         await update.message.reply_text(f"❌ Error occurred: {str(e)}")
 
 # 🚀 Main entry
