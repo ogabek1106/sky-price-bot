@@ -3,7 +3,7 @@ from decimal import Decimal
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, ContextTypes, filters
 from config import BOT_TOKEN
-from amadeus_api import search_validated_offers
+from amadeus_api import search_hy_all_classes
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -58,32 +58,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         origin_code = get_airport_code(origin)
         destination_code = get_airport_code(destination)
 
-        await update.message.reply_text("🔎 Checking real, validated prices…")
+        await update.message.reply_text("🔎 Checking HY flights and all available classes…")
 
-        deals = search_validated_offers(
-            origin_code, destination_code, date,
-            adults=1, currency="RUB", max_results=5
-        )
+        flights = search_hy_all_classes(origin_code, destination_code, date, adults=1, currency="RUB")
 
-        if not deals:
-            await update.message.reply_text(
-                "⚠️ No confirmed fares right now (offers changed while validating). Try another date or route."
-            )
+        if not flights:
+            await update.message.reply_text("⚠️ No HY flights found for this route/date.")
             return
 
         lines = []
-        for d in deals:
-            # Apply service fee
-            final_price = Decimal(str(d["price_total"])) + Decimal(SERVICE_FEE_RUB)
-
-            # Format exactly like your example
-            lines.append(
-                f"🗺 {origin} ({d['dep_airport']}) -> {destination} ({d['arr_airport']})\n"
-                f"✈️ {d['flight_no']}\n"
-                f"⏰ {d['dep_time']}\n"
-                f"📎 {d['cabin']} {d['booking_class']}\n"
-                f"💰 {final_price:.0f} {d['currency']}"
+        for f in flights:
+            flight_header = (
+                f"🗺 {origin} ({f['dep_airport']}) -> {destination} ({f['arr_airport']})\n"
+                f"✈️ {f['flight_no']}\n"
+                f"⏰ {f['dep_time']}"
             )
+            class_lines = []
+            for cls in f["classes"]:
+                base_price = Decimal(str(cls['price_total']))
+                final_price = base_price + Decimal(SERVICE_FEE_RUB)
+                class_lines.append(
+                    f"📎 {cls['cabin']} {cls['booking_class']} — 💰 {final_price:.0f} {cls['currency']}"
+                )
+            lines.append(f"{flight_header}\n" + "\n".join(class_lines))
 
         await update.message.reply_text("\n\n".join(lines))
 
